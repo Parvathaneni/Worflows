@@ -1,0 +1,45 @@
+jobs:
+  update-properties:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Reusable Workflow Repo
+        uses: actions/checkout@v3
+        with:
+          repository: my-org/reusable-workflows
+          path: reusable-workflows
+
+      - name: Load JSON Template
+        run: |
+          JSON_TEMPLATE="reusable-workflows/.github/params.json"
+
+          if [ ! -f "$JSON_TEMPLATE" ]; then
+            echo "Error: params.json not found!"
+            exit 1
+          fi
+
+          PARAMS_JSON=$(cat "$JSON_TEMPLATE")
+          echo "PARAMS_JSON=$PARAMS_JSON" >> $GITHUB_ENV
+
+      - name: Fetch Values from Calling Repo
+        run: |
+          RUN_TEST_VALUE="true"  # Example: Pull from repo’s config.yaml
+          CODE_QUALITY="enabled"
+          DOCKER_SCAN="false"
+          LANGUAGE_CATEGORY="appcode"
+
+          # Replace placeholders with actual values
+          UPDATED_JSON=$(echo "$PARAMS_JSON" | \
+            sed "s/{{run_test}}/$RUN_TEST_VALUE/g" | \
+            sed "s/{{code_quality}}/$CODE_QUALITY/g" | \
+            sed "s/{{docker_scan}}/$DOCKER_SCAN/g" | \
+            sed "s/{{language_category}}/$LANGUAGE_CATEGORY/g")
+
+          echo "UPDATED_JSON=$UPDATED_JSON" >> $GITHUB_ENV
+
+      - name: Send Updated JSON
+        run: |
+          curl -X PATCH -H "Authorization: token ${{ secrets.GH_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Content-Type: application/json" \
+            https://api.github.com/repos/${{ github.repository }}/properties/values \
+            -d "$UPDATED_JSON"
