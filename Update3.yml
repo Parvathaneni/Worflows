@@ -1,0 +1,62 @@
+name: Update JSON with Config Values
+
+on:
+  workflow_call:
+    secrets:
+      GH_TOKEN:
+        required: true
+
+jobs:
+  update-json:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Extract All Values from config.yaml
+        run: |
+          CONFIG_FILE=".github/config.yaml"
+          ENV_FILE="config_env.txt"
+
+          rm -f "$ENV_FILE"
+
+          # Read config.yaml and export all key-value pairs
+          while IFS=: read -r key value; do
+            key=$(echo "$key" | xargs)   # Trim whitespace
+            value=$(echo "$value" | xargs | tr -d '"')  # Trim and remove quotes
+            if [[ -n "$key" && -n "$value" ]]; then
+              # Convert true/false to yes/no
+              [[ "$value" == "true" ]] && value="yes"
+              [[ "$value" == "false" ]] && value="no"
+              echo "$key=$value" >> "$ENV_FILE"
+              echo "$key=$value" >> "$GITHUB_ENV"
+            fi
+          done < "$CONFIG_FILE"
+
+      - name: Replace Values in JSON Dynamically
+        run: |
+          TEMPLATE_FILE=".github/custom_properties_params.json"
+          OUTPUT_FILE="updated_properties.json"
+
+          if [ ! -f "$TEMPLATE_FILE" ]; then
+            echo "Error: JSON template not found!"
+            exit 1
+          fi
+
+          cp "$TEMPLATE_FILE" "$OUTPUT_FILE"
+
+          # Replace all placeholders with values from config_env.txt
+          while IFS== read -r key value; do
+            sed -i "s|{{$key}}|$value|g" "$OUTPUT_FILE"
+          done < "config_env.txt"
+
+          echo "Updated JSON:"
+          cat "$OUTPUT_FILE"
+
+      - name: Upload Updated JSON to GitHub API
+        run: |
+          curl -X PATCH -H "Authorization: token ${{ secrets.GH_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Content-Type: application/json" \
+            https://api.github.com/repos/${{ github.repository }}/properties/values \
+            -d "@updated_properties.json"
