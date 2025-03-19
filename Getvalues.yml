@@ -1,0 +1,22 @@
+- name: Update JSON with extracted values
+  run: |
+    FILE_PATH=".github/config.yaml"
+    JSON_TEMPLATE=".github/params.json"
+
+    # Read JSON template
+    PARAMS_JSON=$(cat "$JSON_TEMPLATE")
+
+    # Extract language (assuming you have it set previously)
+    LANGUAGE=${{ env.language }}
+
+    # Extract run_test value from YAML
+    UNIT_TEST=$(grep '^run_test:' "$FILE_PATH" | awk '{print $2}' | xargs)
+    
+    # Default to "false" if run_test is empty
+    UNIT_TEST=${UNIT_TEST:-"false"}
+
+    # Replace placeholders in JSON template
+    PARAMS_JSON=$(echo "$PARAMS_JSON" | sed "s/{{LANGUAGE}}/$LANGUAGE/g" | sed "s/{{UNIT_TEST}}/$UNIT_TEST/g")
+
+    echo "PARAMS_JSON=$PARAMS_JSON" >> $GITHUB_ENV
+    echo "Updated JSON: $PARAMS_JSON"
