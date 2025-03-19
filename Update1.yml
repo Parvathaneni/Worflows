@@ -1,0 +1,57 @@
+jobs:
+  update-properties:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Calling Repo
+        uses: actions/checkout@v3
+
+      - name: Checkout Reusable Workflow Repo
+        uses: actions/checkout@v3
+        with:
+          repository: my-org/reusable-workflows
+          path: reusable-workflows
+
+      - name: Extract Values from config.yaml
+        run: |
+          CONFIG_FILE=".github/config.yaml"
+
+          if [ ! -f "$CONFIG_FILE" ]; then
+            echo "Error: config.yaml not found!"
+            exit 1
+          fi
+
+          # Extract values using grep & sed (without yq)
+          RUN_TEST_VALUE=$(grep "run_test:" "$CONFIG_FILE" | sed 's/run_test: //g' | tr -d '[:space:]')
+          CODE_QUALITY=$(grep "code_quality:" "$CONFIG_FILE" | sed 's/code_quality: //g' | tr -d '[:space:]')
+          DOCKER_SCAN=$(grep "docker_scan:" "$CONFIG_FILE" | sed 's/docker_scan: //g' | tr -d '[:space:]')
+
+          echo "RUN_TEST_VALUE=$RUN_TEST_VALUE" >> $GITHUB_ENV
+          echo "CODE_QUALITY=$CODE_QUALITY" >> $GITHUB_ENV
+          echo "DOCKER_SCAN=$DOCKER_SCAN" >> $GITHUB_ENV
+
+      - name: Load JSON Template & Replace Values
+        run: |
+          JSON_TEMPLATE="reusable-workflows/.github/params.json"
+
+          if [ ! -f "$JSON_TEMPLATE" ]; then
+            echo "Error: params.json not found!"
+            exit 1
+          fi
+
+          PARAMS_JSON=$(cat "$JSON_TEMPLATE")
+
+          # Replace placeholders with actual values
+          UPDATED_JSON=$(echo "$PARAMS_JSON" | \
+            sed "s/{{run_test}}/$RUN_TEST_VALUE/g" | \
+            sed "s/{{code_quality}}/$CODE_QUALITY/g" | \
+            sed "s/{{docker_scan}}/$DOCKER_SCAN/g")
+
+          echo "UPDATED_JSON=$UPDATED_JSON" >> $GITHUB_ENV
+
+      - name: Send Updated JSON
+        run: |
+          curl -X PATCH -H "Authorization: token ${{ secrets.GH_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Content-Type: application/json" \
+            https://api.github.com/repos/${{ github.repository }}/properties/values \
+            -d "$UPDATED_JSON"
