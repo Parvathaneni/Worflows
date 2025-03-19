@@ -1,0 +1,23 @@
+- name: Extract parameter values dynamically
+  run: |
+    declare -A PARAM_MAPPING
+    PARAM_MAPPING["run_test"]="unit-test-enabled"
+    PARAM_MAPPING["code_quality_analysis"]="code-quality-check"
+    PARAM_MAPPING["docker_scan_image"]="docker-scan"
+
+    PARAMS_JSON="[{\"property_name\":\"technology\",\"value\":\"${{ env.language }}\"}]"
+
+    if [ "$file_exists" == "true" ]; then
+      for param in "${!PARAM_MAPPING[@]}"; do
+        value=$(grep -E "^${param}:" .github/config.yaml | awk '{print $2}')
+
+        if [[ ! -z "$value" && "$value" != "null" ]]; then
+          MAPPED_NAME=${PARAM_MAPPING[$param]}
+          echo "$MAPPED_NAME=$value" >> $GITHUB_ENV
+          PARAMS_JSON+=",{\"property_name\":\"$MAPPED_NAME\",\"value\":\"$value\"}"
+          echo "Mapped: $param -> $MAPPED_NAME = $value"
+        fi
+      done
+    fi
+
+    echo "PARAMS_JSON=$PARAMS_JSON" >> $GITHUB_ENV
