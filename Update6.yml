@@ -1,0 +1,33 @@
+      - name: Load and update JSON template (Only Defined Keys)
+        run: |
+          JSON_TEMPLATE="reusable-metrics-workflows/.github/custom_properties_params.json"
+          OUTPUT_FILE="updated_properties.json"
+
+          if [[ ! -f "$JSON_TEMPLATE" ]]; then
+            echo "Error: custom_properties_params.json not found"
+            exit 1
+          fi
+
+          cp "$JSON_TEMPLATE" "$OUTPUT_FILE"
+
+          # Extract only keys that are present in the JSON template
+          grep -o '{{[^}]*}}' "$JSON_TEMPLATE" | tr -d '{}' | sort -u > required_keys.txt
+
+          echo "Required keys extracted from JSON template:"
+          cat required_keys.txt
+
+          # Replace placeholders in JSON template using only the required keys
+          while IFS="=" read -r key value; do
+            if grep -q "^$key$" required_keys.txt; then
+              placeholder="{{${key}}}"
+
+              # Escape special characters for safe sed replacement
+              safe_value=$(printf '%s\n' "$value" | sed -e 's/[\/&]/\\&/g')
+
+              # Replace only the required keys
+              sed -i "s|$placeholder|$safe_value|g" "$OUTPUT_FILE"
+            fi
+          done < "config_env.txt"
+
+          echo "Updated JSON:"
+          cat "$OUTPUT_FILE"
