@@ -1,0 +1,92 @@
+name: update-repository-custom-properties
+
+on:
+  workflow_call:
+    secrets:
+      GH_TOKEN:
+        required: true
+
+jobs:
+  update-custom-properties:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v2
+
+      - name: Checkout reusable workflow repo
+        uses: actions/checkout@v2
+        with:
+          repository: ebusiness/reusable-metrics-workflows
+          path: reusable-metrics-workflows
+
+      - name: Get repository language dynamically
+        run: |
+          language=$(curl -s -H "Authorization: token ${{ secrets.GH_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/languages | jq -r 'keys | join("-")')
+          echo "language=$language" >> $GITHUB_ENV
+          echo "Detected language: $language"
+
+      - name: Check if config.yaml file exists
+        run: |
+          CONFIG_FILE=".github/config.yaml"
+          if [[ -f "$CONFIG_FILE" ]]; then
+            echo "File exists."
+            echo "config_exists=true" >> $GITHUB_ENV
+          else
+            echo "File does not exist."
+            echo "config_exists=false" >> $GITHUB_ENV
+          fi
+
+      - name: Extract key-value pairs from config.yaml
+        if: env.config_exists == 'true'
+        run: |
+          CONFIG_FILE=".github/config.yaml"
+          ENV_FILE="config_env.txt"
+          rm -f "$ENV_FILE"
+
+          # Read config.yaml and export all key-value pairs
+          while IFS=":" read -r key value; do
+            key=$(echo "$key" | xargs)  # Trim whitespace
+            value=$(echo "$value" | xargs | tr -d '"')  # Trim and remove quotes
+            if [[ -n "$key" && -n "$value" ]]; then
+              # Convert true/false to yes/no
+              [[ "$value" == "true" ]] && value="YES"
+              [[ "$value" == "false" ]] && value="NO"
+              echo "$key=$value" >> "$ENV_FILE"
+              echo "$key=$value" >> $GITHUB_ENV
+            fi
+          done < "$CONFIG_FILE"
+
+      - name: Load and update JSON template
+        run: |
+          JSON_TEMPLATE="reusable-metrics-workflows/.github/custom_properties_params.json"
+          OUTPUT_FILE="updated_properties.json"
+
+          if [[ ! -f "$JSON_TEMPLATE" ]]; then
+            echo "Error: custom_properties_params.json not found"
+            exit 1
+          fi
+
+          cp "$JSON_TEMPLATE" "$OUTPUT_FILE"
+
+          # Replace placeholders with actual values from config_env.txt
+          while IFS="=" read -r key value; do
+            if [[ -z "$key" || "$key" =~ ^# ]]; then
+              continue
+            fi
+            key_trimmed=$(echo "$key" | xargs)
+            placeholder="{{${key_trimmed}}}"
+            sed -i "s|$placeholder|$value|g" "$OUTPUT_FILE"
+          done < "config_env.txt"
+
+          echo "Updated JSON:"
+          cat "$OUTPUT_FILE"
+          echo "FINAL_PARAMS_JSON=$(cat $OUTPUT_FILE)" >> $GITHUB_ENV
+
+      - name: Update repository properties dynamically
+        run: |
+          curl -X PATCH -H "Authorization: token ${{ secrets.GH_TOKEN }}" \
+               -H "Accept: application/vnd.github.mercy-preview+json" \
+               -H "Content-Type: application/json" \
+               --data "${FINAL_PARAMS_JSON}" \
+               https://api.github.com/repos/${{ github.repository }}/properties/values
