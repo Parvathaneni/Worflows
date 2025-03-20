@@ -1,0 +1,29 @@
+      - name: Load and update JSON template
+        run: |
+          JSON_TEMPLATE="reusable-metrics-workflows/.github/custom_properties_params.json"
+          OUTPUT_FILE="updated_properties.json"
+
+          if [[ ! -f "$JSON_TEMPLATE" ]]; then
+            echo "Error: custom_properties_params.json not found"
+            exit 1
+          fi
+
+          cp "$JSON_TEMPLATE" "$OUTPUT_FILE"
+
+          # Replace placeholders in JSON template using extracted values
+          while IFS="=" read -r key value; do
+            if [[ -z "$key" || "$key" =~ ^# ]]; then
+              continue
+            fi
+            key_trimmed=$(echo "$key" | xargs)
+            placeholder="{{${key_trimmed}}}"
+            value=$(echo "$value" | sed 's/[\/&]/\\&/g')  # Escape special characters
+            sed -i "s|$placeholder|$value|g" "$OUTPUT_FILE"
+          done < "config_env.txt"
+
+          echo "Updated JSON:"
+          cat "$OUTPUT_FILE"
+
+          # Ensure JSON is single-line before saving to GITHUB_ENV
+          FINAL_PARAMS_JSON=$(jq -c . < "$OUTPUT_FILE")
+          echo "FINAL_PARAMS_JSON=$FINAL_PARAMS_JSON" >> $GITHUB_ENV
