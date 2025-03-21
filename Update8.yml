@@ -1,0 +1,21 @@
+- name: Dynamically Replace Environment Variables in JSON
+  run: |
+    JSON_TEMPLATE="reusable-metrics-workflows/.github/custom_properties_params.json"
+    OUTPUT_FILE="updated_properties.json"
+
+    if [[ ! -f "$JSON_TEMPLATE" ]]; then
+      echo "Error: JSON template not found!"
+      exit 1
+    fi
+
+    # Convert GitHub environment variables into jq format dynamically
+    ENV_VARS=$(env | awk -F= '{print "--arg " $1 " \"" $2 "\""}' | tr '\n' ' ')
+
+    # Use jq to replace placeholders dynamically
+    jq "$ENV_VARS" '
+      walk(if type == "object" and has("value") and (.value | test("^\\{\\{.+\\}\\}$")) then
+        .value = (env[.value | gsub("[{}]"; "")] // .value)
+      else . end)' "$JSON_TEMPLATE" > "$OUTPUT_FILE"
+
+    echo "Updated JSON:"
+    cat "$OUTPUT_FILE"
