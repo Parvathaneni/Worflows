@@ -1,0 +1,52 @@
+- name: Load and update JSON template (Only Defined Keys)
+  run: |
+    JSON_TEMPLATE="reusable-metrics-workflows/.github/custom_properties_params.json"
+    OUTPUT_FILE="updated_properties.json"
+
+    if [[ ! -f "$JSON_TEMPLATE" ]]; then
+      echo "Error: custom_properties_params.json not found"
+      exit 1
+    fi
+
+    cp "$JSON_TEMPLATE" "$OUTPUT_FILE"
+
+    # Extract only keys that are present in the JSON template
+    grep -o '{{[^{}]*}}' "$JSON_TEMPLATE" | tr -d '{}' | sort -u > required_keys.txt
+
+    echo "Required keys extracted from JSON template:"
+    cat required_keys.txt
+
+    source "$GITHUB_ENV"
+    echo "Preparing key-value replacements..."
+    > config_env.txt
+
+    # For each required key, pull its values
+    while IFS= read -r key; do
+      value="${!key}"
+      if [[ -n "$value" ]]; then
+        echo "$key=$value" >> config_env.txt
+      else
+        echo "warning: '$key' not found in the environment"
+      fi
+    done < required_keys.txt
+
+    # Replace placeholders in JSON template using only the required keys
+    while IFS='=' read -r key value; do
+      # Escape special characters for safe sed replacement
+      placeholder="{{${key}}}"
+      safe_value=$(printf "%s\n" "$value" | sed -e 's/[\/&]/\\&/g')
+
+      # If value contains comma or space, wrap it in quotes
+      if [[ "$safe_value" == *[[:space:],]* ]]; then
+        safe_value="\"$safe_value\""
+      fi
+
+      # Replace only the required keys
+      sed -i "s|$placeholder|$safe_value|g" "$OUTPUT_FILE"
+    done < config_env.txt
+
+    echo "Updated JSON:"
+    cat "$OUTPUT_FILE"
+
+    FINAL_PARAMS_JSON=$(jq -c . "$OUTPUT_FILE")
+    echo "FINAL_PARAMS_JSON=$FINAL_PARAMS_JSON" >> "$GITHUB_ENV"
