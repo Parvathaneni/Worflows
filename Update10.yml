@@ -1,0 +1,32 @@
+#!/bin/bash
+set -e
+
+CONFIG_FILE="config.yaml"
+TEMPLATE_FILE="custom_properties_params.json"
+OUTPUT_FILE="updated_properties.json"
+
+# Step 1: Load config.yaml into a key-value map
+declare -A CONFIG_MAP
+
+while IFS=":" read -r key value; do
+  key=$(echo "$key" | xargs | tr -d '\r')
+  value=$(echo "$value" | xargs | tr -d '\r')
+  CONFIG_MAP["$key"]="$value"
+done < "$CONFIG_FILE"
+
+# Step 2: Extract all placeholders like {{var}} from the JSON template
+PLACEHOLDERS=$(grep -o '{{[^}]*}}' "$TEMPLATE_FILE" | tr -d '{}' | sort -u)
+
+# Step 3: Dynamically export all variables for envsubst
+for var in $PLACEHOLDERS; do
+  value="${CONFIG_MAP[$var]}"
+  if [[ -z "$value" ]]; then
+    value="NA"
+  fi
+  export "$var=$value"
+done
+
+# Step 4: Substitute variables in the JSON template
+envsubst < "$TEMPLATE_FILE" > "$OUTPUT_FILE"
+
+echo "✅ Updated JSON written to: $OUTPUT_FILE"
