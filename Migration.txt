@@ -1,0 +1,25 @@
+Here’s a cleaned-up and corrected version of your checklist for application migration from Jenkins pipelines to the TEP platform (GitHub Actions-based).
+
+⸻
+
+Application Migration Checklist: Jenkins to TEP (GitHub Actions)
+
+Task	Description	Performed By	Status
+New TFE Workspace	Create a TFE Workspace for the target sandbox environment.		
+Copy TF Variables from TFE Workspace	Copy Terraform variables from an existing workspace to the new one (only if required).		
+Add gha-tf-access	Add the gha-tf-access GitHub app to allow GitHub Actions to access TF modules in private repos.Ensure allow_tcp is set if modules are not in Terraform Registry.		
+Branch Strategy	Choose New or Existing Branch. Determine which branch will be used for TEP migration.		
+TEP Onboard	Add the application repo to TEP by registering it through the TEP portal.		
+Copy TF Infra Code into App Repo	Move Terraform infrastructure code under the /tf folder in the same application repository.		
+Update TF Code in App Repo (if needed)	Modify TF code structure as needed for compatibility with TEP pipelines.		
+Map Jenkins Stages to TEP	Review the Jenkins pipeline stages and ensure they are reflected correctly in the TEP GitHub Actions workflow.		
+Update .github/config.yml	Configure the values under the components section, such as:artifact_name, files_to_compress, run_build, run_test, working_directory, language, version, etc.		
+Add Integration Tests	If integration tests exist, pass the related commands under:pre_build_commands, post_build_commands, post_install_commands, post_publish_commands in .github/config.yml.		
+Terraform Local Test	Before committing, test using the local backend:terraform init && terraform plan to verify no major infrastructure changes.		
+Trigger CI Build Pipeline	Trigger the pipeline via commit push or manual trigger using GitHub workflow dispatch.		
+
+
+
+⸻
+
+Let me know if you want this exported to Excel or markdown format for your GitHub repo or TEP onboarding documentation.
