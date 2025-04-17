@@ -3,7 +3,28 @@
 This repository provides a structured approach to managing and scaling DevOps metrics across multiple Lines of Business (LOBs) such as BI, DE, PI, and Corporate Technology. The goal is to enable centralized visibility while preserving flexibility for team-specific requirements.
 
 ---
+Sure! Here’s a matching section for your orgs/ folder in the same style as the existing lob-shared/ and lob-specific/ descriptions:
 
+⸻
+
+orgs/
+
+Contains line-of-business (LOB)-specific GitHub repository lists used for automation processes (e.g., tagging, metrics enrichment).
+Each LOB folder (e.g., bi/, de/, pi/) includes one or more .repos.json files — typically split into manageable batches (e.g., 1.repos.json, 2.repos.json) of repositories fetched dynamically via the GitHub API.
+
+Examples:
+	•	bi/1.repos.json: First set of BI-owned repositories
+	•	de/1.repos.json: First set of DE-owned repositories
+	•	pi/1.repos.json: First set of PI-owned repositories
+
+Use for:
+	•	Storing dynamically generated repo lists for GitHub Actions workflows
+	•	Batch-processing large-scale tagging, language detection, and metadata updates
+	•	Organizing LOB-specific automation input without manual repo grouping
+
+⸻
+
+Let me know if you’d like me to also create a markdown snippet you can paste directly into your README.md.
 ## Goals
 
 - Establish a reusable, scalable framework for metrics collection and visualization.
