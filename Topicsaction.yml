@@ -1,0 +1,31 @@
+name: 'Fetch Repository Topics'
+description: 'Fetches GitHub topics for repositories using a token and outputs results to a JSON file.'
+
+inputs:
+  orgInput:
+    description: 'Name of the org folder to scan under /orgs (e.g., de, pi). Leave blank to scan all.'
+    required: false
+    default: ''
+
+  token:
+    description: 'GitHub token with repo scope'
+    required: true
+
+runs:
+  using: 'node16'
+  main: 'src/fetchTopics.js'
+
+
+
+
+  jobs:
+  fetch-topics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Run Custom Fetch Topics Action
+        uses: ./lob-shared/readtopics
+        with:
+          orgInput: de
+          token: ${{ secrets.GH_TOKEN_DE }}
