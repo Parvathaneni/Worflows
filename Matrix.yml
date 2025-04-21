@@ -1,0 +1,50 @@
+name: Fetch GitHub Metrics
+
+on:
+  workflow_dispatch:
+
+jobs:
+  prepare-matrix:
+    name: Prepare matrix from org folders
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Generate matrix JSON
+        id: set-matrix
+        run: |
+          echo "Generating matrix..."
+          matrix=$(find orgs -name '*.json' | jq -R -s -c 'split("\n") | map(select(length > 0)) | map({
+            org: split("/")[1],
+            file: split("/")[2]
+          })')
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+
+  fetch-topics:
+    needs: prepare-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Run Custom Fetch Topics Action
+        uses: ./lob-shared/topics
+        with:
+          token: ${{ secrets.GH_TOKEN_ABHISEK }}
+          org: ${{ matrix.org }}
+          file: orgs/${{ matrix.org }}/${{ matrix.file }}
+
+      - name: Commit Topics Output
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add lob-shared/topics/topics-output.json
+          git commit -m "Update topics-output.json from workflow" || echo "No Changes to Commit"
+          git push origin ${{ github.ref_name }}
