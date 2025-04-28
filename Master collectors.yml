@@ -1,0 +1,87 @@
+name: Metrics Collector Master
+
+on:
+  workflow_call:
+    inputs:
+      org_folder:
+        description: "Org folder under orgs/"
+        required: true
+        type: string
+      action_folder:
+        description: "Action folder under lob-shared/"
+        required: true
+        type: string
+    secrets:
+      GH_PAT:
+        required: true
+
+jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Validate and Batch JSON Files
+        id: set-matrix
+        run: |
+          INPUT_FOLDER="orgs/${{ inputs.org_folder }}"
+
+          mkdir -p valid_jsons invalid_jsons matrix_batches failed_repos
+
+          echo "Validating JSON files..."
+          for file in $(find "$INPUT_FOLDER" -name "*.json"); do
+            if jq empty "$file" > /dev/null 2>&1; then
+              cp "$file" valid_jsons/
+            else
+              cp "$file" invalid_jsons/
+            fi
+          done
+
+          if [ ! "$(ls -A valid_jsons)" ]; then
+            echo "No valid JSONs found."
+            exit 1
+          fi
+
+          jq -s 'add' valid_jsons/*.json > all_repos.json
+
+          total_repos=$(jq length all_repos.json)
+          echo "Total repos: $total_repos"
+
+          batch_size=500
+          batch_num=0
+          for ((i=0; i<total_repos; i+=batch_size)); do
+            jq ".[$i:($i+$batch_size)]" all_repos.json > matrix_batches/batch_${batch_num}.json
+            batch_num=$((batch_num+1))
+          done
+
+          batch_files=$(ls matrix_batches | jq -R -s -c 'split("\n")[:-1]')
+          echo "matrix={\"batch\":$batch_files}" >> $GITHUB_OUTPUT
+
+  fetch-and-process:
+    needs: prepare-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Load batch
+        run: |
+          cp matrix_batches/${{ matrix.batch }} repos.json
+
+      - name: Process repos
+        run: |
+          repos=$(jq -r '.[].repo' repos.json)
+          for repo in $repos; do
+            echo "Processing repo: $repo"
+            # Here you can call your custom GitHub Action like ./lob-shared/${{ inputs.action_folder }}
+          done
