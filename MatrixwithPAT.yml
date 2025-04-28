@@ -1,0 +1,138 @@
+name: Metrics Collector Using PAT
+
+on:
+  workflow_dispatch:
+    inputs:
+      folder:
+        description: 'Subfolder to scan (default: all)'
+        required: false
+
+jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get install -y jq
+
+      - name: Find and Validate JSON Files
+        id: validate
+        run: |
+          echo "Finding and validating JSON files..."
+
+          mkdir valid_jsons
+          mkdir invalid_jsons
+
+          export INPUT_FOLDER="${{ github.event.inputs.folder || '.' }}"
+
+          find "$INPUT_FOLDER" -name "*.json" | while read -r file; do
+            if jq empty "$file" > /dev/null 2>&1; then
+              cp "$file" valid_jsons/
+            else
+              cp "$file" invalid_jsons/
+            fi
+          done
+
+          if [ "$(ls -A valid_jsons)" ]; then
+            jq -s 'add' valid_jsons/*.json > merged_matrix.json
+          else
+            echo "No valid JSON files found. Exiting..."
+            exit 1
+          fi
+
+      - name: Create Batches
+        id: set-matrix
+        run: |
+          mkdir matrix_batches
+          split_size=500
+
+          total_repos=$(jq '. | length' merged_matrix.json)
+          batch_num=0
+          for ((i=0; i<total_repos; i+=split_size)); do
+            jq ".[$i:($i+$split_size)]" merged_matrix.json > matrix_batches/batch_${batch_num}.json
+            batch_num=$((batch_num+1))
+          done
+
+          batch_files=$(ls matrix_batches | jq -R -s -c 'split("\n")[:-1]')
+          echo "matrix={\"batch\":$batch_files}" >> $GITHUB_OUTPUT
+
+  fetch-metrics:
+    needs: prepare-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Process batch of repos
+        run: |
+          mkdir -p failed_repos
+
+          jq '.' "matrix_batches/${{ matrix.batch }}" > repos.json
+
+          # If you want token rotation, define multiple secrets like GH_PAT1, GH_PAT2, etc.
+          TOKENS=("${{ secrets.GH_PAT1 }}" "${{ secrets.GH_PAT2 }}" "${{ secrets.GH_PAT3 }}")
+          NUM_TOKENS=${#TOKENS[@]}
+
+          index=0
+          for repo in $(jq -r '.[].repo' repos.json); do
+            echo "Processing repo: $repo"
+
+            TOKEN_INDEX=$((index % NUM_TOKENS))
+            GH_TOKEN="${TOKENS[$TOKEN_INDEX]}"
+
+            if ! curl -s -H "Authorization: token $GH_TOKEN" \
+                     -H "Accept: application/vnd.github.mercy-preview+json" \
+                     "https://api.github.com/repos/$repo/topics"; then
+              echo "{\"repo\":\"$repo\"}" >> failed_repos/list.jsonl
+            fi
+
+            index=$((index + 1))
+          done
+
+      - name: Save failed repos
+        if: always()
+        run: |
+          if [ -f failed_repos/list.jsonl ]; then
+            jq -s '.' failed_repos/list.jsonl > failed_repos/failed_repos.json
+            echo "Failed repos captured."
+          else
+            echo "No failed repos."
+          fi
+
+  retry-failed:
+    needs: fetch-metrics
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Retry Failed Repos
+        run: |
+          if [ -f failed_repos/failed_repos.json ]; then
+            TOKENS=("${{ secrets.GH_PAT1 }}" "${{ secrets.GH_PAT2 }}" "${{ secrets.GH_PAT3 }}")
+            NUM_TOKENS=${#TOKENS[@]}
+
+            index=0
+            for repo in $(jq -r '.[].repo' failed_repos/failed_repos.json); do
+              echo "Retrying repo: $repo"
+
+              TOKEN_INDEX=$((index % NUM_TOKENS))
+              GH_TOKEN="${TOKENS[$TOKEN_INDEX]}"
+
+              curl -s -H "Authorization: token $GH_TOKEN" \
+                   -H "Accept: application/vnd.github.mercy-preview+json" \
+                   "https://api.github.com/repos/$repo/topics"
+
+              index=$((index + 1))
+            done
+          else
+            echo "No repos to retry."
+          fi
