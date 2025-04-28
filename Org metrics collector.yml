@@ -1,0 +1,15 @@
+name: Metrics Collector - OrgA
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Optional: Runs every day at 2 AM UTC
+  workflow_dispatch:     # Allows manual run also
+
+jobs:
+  call-master-workflow:
+    uses: ./.github/workflows/metrics-collector-master.yml
+    with:
+      org_folder: "orgA"
+      action_folder: "topics"     # or "reptype-and-technology" based on need
+    secrets:
+      GH_PAT: ${{ secrets.GH_PAT_ORGA }}
