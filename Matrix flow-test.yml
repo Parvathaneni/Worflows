@@ -1,0 +1,151 @@
+name: Master Metrics Collector (Validation + Batching + Retry)
+
+on:
+  workflow_dispatch:
+    inputs:
+      folder:
+        description: 'Folder under lob-shared (e.g., topics, reptype-and-technology)'
+        required: true
+    # (optional: can later add a scheduled trigger too)
+  workflow_call:
+    inputs:
+      folder:
+        required: true
+        type: string
+    secrets:
+      GH_PAT:
+        required: true
+
+jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Validate and Batch JSON files
+        id: set-matrix
+        run: |
+          INPUT_FOLDER="lob-shared/${{ inputs.folder }}"
+
+          if [ ! -d "$INPUT_FOLDER" ]; then
+            echo "Folder $INPUT_FOLDER does not exist. Exiting."
+            exit 1
+          fi
+
+          mkdir -p valid_jsons invalid_jsons matrix_batches failed_repos
+
+          echo "Validating JSON files..."
+          for file in $(find "$INPUT_FOLDER" -name "*.json"); do
+            if jq empty "$file" > /dev/null 2>&1; then
+              cp "$file" valid_jsons/
+              echo "Valid JSON: $file"
+            else
+              cp "$file" invalid_jsons/
+              echo "Invalid JSON skipped: $file"
+            fi
+          done
+
+          if [ ! "$(ls -A valid_jsons)" ]; then
+            echo "No valid JSON files found. Exiting."
+            exit 1
+          fi
+
+          echo "Merging valid JSONs..."
+          jq -s 'add' valid_jsons/*.json > all_repos.json
+
+          total_repos=$(jq length all_repos.json)
+          echo "Total valid repos found: $total_repos"
+
+          batch_size=500
+          batch_num=0
+          for ((i=0; i<total_repos; i+=batch_size)); do
+            jq ".[$i:($i+$batch_size)]" all_repos.json > matrix_batches/batch_${batch_num}.json
+            batch_num=$((batch_num+1))
+          done
+
+          batch_files=$(ls matrix_batches | jq -R -s -c 'split("\n")[:-1]')
+          echo "matrix={\"batch\":$batch_files}" >> $GITHUB_OUTPUT
+
+  fetch-and-process:
+    needs: prepare-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Load Batch
+        run: |
+          cp matrix_batches/${{ matrix.batch }} repos.json
+
+      - name: Run Local Action for Each Repo
+        run: |
+          mkdir -p failed_repos
+
+          total_repos=$(jq length repos.json)
+          for ((i=0; i<$total_repos; i++)); do
+            repo=$(jq -r ".[$i].repo" repos.json)
+            echo "Running action for repo: $repo"
+
+            set +e
+            gh workflow run --repo ${{ github.repository }} \
+              ./lob-shared/${{ inputs.folder }} \
+              --ref ${{ github.sha }} \
+              -f token="${{ secrets.GH_PAT }}" \
+              -f repo="$repo"
+
+            status=$?
+            set -e
+
+            if [ $status -ne 0 ]; then
+              echo "{\"repo\":\"$repo\"}" >> failed_repos/failed_list.jsonl
+              echo "Repo failed: $repo"
+            else
+              echo "Repo succeeded: $repo"
+            fi
+          done
+
+      - name: Save Failed Repos
+        if: always()
+        run: |
+          if [ -f failed_repos/failed_list.jsonl ]; then
+            jq -s '.' failed_repos/failed_list.jsonl > failed_repos/failed_repos.json
+            echo "Failed repos saved."
+          else
+            echo "No failed repos."
+          fi
+
+  retry-failed:
+    needs: fetch-and-process
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Retry Failed Repos
+        run: |
+          if [ -f failed_repos/failed_repos.json ]; then
+            total_retries=$(jq length failed_repos/failed_repos.json)
+            for ((i=0; i<$total_retries; i++)); do
+              repo=$(jq -r ".[$i].repo" failed_repos/failed_repos.json)
+              echo "Retrying repo: $repo"
+
+              gh workflow run --repo ${{ github.repository }} \
+                ./lob-shared/${{ inputs.folder }} \
+                --ref ${{ github.sha }} \
+                -f token="${{ secrets.GH_PAT }}" \
+                -f repo="$repo"
+            done
+          else
+            echo "No repos to retry."
+          fi
